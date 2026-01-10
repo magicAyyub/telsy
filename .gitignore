@@ -1,0 +1,15 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+data/cityscapes/leftImg8bit
+data/cityscapes/gtFine
+
+pretrained_models/adversarial-patch-baseline.log
+pretrained_models/bisenetv2_cityscapes.pth
