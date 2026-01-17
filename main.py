@@ -7,6 +7,7 @@ import torch
 import numpy as np
 import cv2
 import time
+import onnxruntime as ort
 from typing import Tuple, Optional, Dict, Any, List
 from torchvision import transforms
 from torchvision.utils import draw_segmentation_masks
@@ -15,27 +16,49 @@ from helper import get_device
 
 
 class RealtimeSegmentation:
-    def __init__(self, config_path: str = 'configs/config.yaml') -> None:
+    def __init__(self, config_path: str = 'configs/config.yaml', use_onnx: bool = True) -> None:
         with open(config_path, 'r') as f:
             self.config: Dict[str, Any] = yaml.safe_load(f)
         
+        self.use_onnx = use_onnx
         self.device = get_device()
         self.model = self._load_model()
         self.preprocess = self._get_preprocessing()
         self.color_palette: np.ndarray = np.array(self.config['color_palette'], dtype=np.uint8)
         self.class_names: List[str] = self.config['class_names']
         
-    def _load_model(self) -> BiSeNetV2:
+    def _load_model(self):
         model_config: Dict[str, Any] = self.config['model']
-        model: BiSeNetV2 = BiSeNetV2(n_classes=self.config['dataset']['num_classes'], aux_mode='eval')
         
-        if os.path.exists(model_config['pretrained_path']):
-            state_dict = torch.load(model_config['pretrained_path'], map_location='cpu')
-            model.load_state_dict(state_dict, strict=False)
-        
-        model.to(self.device)
-        model.eval()
-        return model
+        if self.use_onnx:
+            # Load ONNX model
+            onnx_path = model_config.get('onnx_path', 'pretrained_models/bisenetv2.onnx')
+            if not os.path.exists(onnx_path):
+                raise FileNotFoundError(f"ONNX model not found at {onnx_path}")
+            
+            # Configure ONNX Runtime session
+            providers = ['CPUExecutionProvider']
+            if self.device == 'cuda':
+                providers.insert(0, 'CUDAExecutionProvider')
+            elif str(self.device) == 'mps':
+                # MPS not directly supported by ONNX Runtime, use CPU
+                print("Warning: MPS not supported by ONNX Runtime, using CPU")
+            
+            session = ort.InferenceSession(onnx_path, providers=providers)
+            print(f"ONNX model loaded from {onnx_path}")
+            print(f"Using providers: {session.get_providers()}")
+            return session
+        else:
+            # Load PyTorch model
+            model: BiSeNetV2 = BiSeNetV2(n_classes=self.config['dataset']['num_classes'], aux_mode='eval')
+            
+            if os.path.exists(model_config['pretrained_path']):
+                state_dict = torch.load(model_config['pretrained_path'], map_location='cpu')
+                model.load_state_dict(state_dict, strict=False)
+            
+            model.to(self.device)
+            model.eval()
+            return model
     
     def _get_preprocessing(self) -> transforms.Compose:
         image_size: Tuple[int, int] = tuple(self.config['dataset']['image_size'])
@@ -53,14 +76,31 @@ class RealtimeSegmentation:
         h, w = frame.shape[:2]
         
         # Preprocess
-        input_tensor = self.preprocess(frame).unsqueeze(0).to(self.device)
+        input_tensor = self.preprocess(frame).unsqueeze(0)
         
         # Inference
-        with torch.no_grad():
-            output = self.model(input_tensor)
-            if isinstance(output, tuple):
-                output = output[0]
-            prediction = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
+        if self.use_onnx:
+            # ONNX Runtime inference
+            input_name = self.model.get_inputs()[0].name
+            output_name = self.model.get_outputs()[0].name
+            
+            # Convert to numpy for ONNX Runtime
+            input_data = input_tensor.numpy()
+            
+            # Run inference
+            outputs = self.model.run([output_name], {input_name: input_data})
+            output = outputs[0]
+            
+            # Get prediction
+            prediction = np.argmax(output, axis=1).squeeze(0)
+        else:
+            # PyTorch inference
+            input_tensor = input_tensor.to(self.device)
+            with torch.no_grad():
+                output = self.model(input_tensor)
+                if isinstance(output, tuple):
+                    output = output[0]
+                prediction = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
         
         # Resize to original size
         prediction = cv2.resize(prediction, (w, h), interpolation=cv2.INTER_NEAREST)
@@ -374,10 +414,12 @@ def main() -> None:
                         help='Show only segmentation mask')
     parser.add_argument('--save-stream', action='store_true',
                         help='Save stream output to video file (for stream mode)')
+    parser.add_argument('--use-pytorch', action='store_true',
+                        help='Use PyTorch instead of ONNX for inference')
     
     args: argparse.Namespace = parser.parse_args()
     
-    segmenter: RealtimeSegmentation = RealtimeSegmentation(args.config)
+    segmenter: RealtimeSegmentation = RealtimeSegmentation(args.config, use_onnx=not args.use_pytorch)
     
     if args.mode == 'webcam':
         segmenter.run_webcam(camera_id=args.camera, show_overlay=not args.no_overlay)

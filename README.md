@@ -29,7 +29,7 @@ I used my iPhone as a webcam via Camo, but you can also use the built-in webcam.
 uv run python main.py --mode webcam
 
 # Use iPhone as webcam (with Camo or Continuity Camera)
-uv run python main.py --mode webcam --camera 2
+uv run python main.py --mode webcam --camera 1
 ```
 
 

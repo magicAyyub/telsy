@@ -17,6 +17,7 @@ model:
   architecture: "bisenetv2"  # "bisenetv2", "fpn", "deeplabv3+", etc.
   encoder: "mobilenet_v2"  # only used for smp models
   pretrained_path: "pretrained_models/bisenetv2_cityscapes.pth"
+  onnx_path: "pretrained_models/bisenetv2.onnx"
   
 # Training Configuration (if fine-tuning)
 training:
