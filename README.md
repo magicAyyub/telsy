@@ -38,6 +38,7 @@ uv run python main.py --mode webcam --camera 1
 1. Visit: https://www.kaggle.com/code/agampy/adversarial-patch-baseline/notebook
 2. Download the BiSeNetV2 pretrained model
 3. Place in: `pretrained_models/bisenetv2_cityscapes.pth`
+4. (Optional) Convert to ONNX and place in: `pretrained_models/bisenetv2.onnx`
 
 
 ## References
